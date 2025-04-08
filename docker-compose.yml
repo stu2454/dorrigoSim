@@ -1,0 +1,11 @@
+version: '3'
+
+services:
+  dorrigo-simulator:
+    build: .
+    container_name: dorrigo-simulator
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app
+    restart: unless-stopped
