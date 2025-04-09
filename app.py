@@ -593,12 +593,14 @@ with st.sidebar.expander("Retirement & Super Access", expanded=False):
         user_super_amount = st.number_input("Your Est. Super Access Amount (AUD$)", min_value=0, max_value=2000000, value=700000, step=10000, format="%d", key="user_super_amount")
         wife_retire_year = st.number_input("Partner's Retirement Year (Years from now)", min_value=0, max_value=proj_years_default, value=10, step=1, key="wife_retire_year")
         wife_super_amount = st.number_input("Partner's Est. Super Access Amount (AUD$)", min_value=0, max_value=2000000, value=600000, step=10000, format="%d", key="wife_super_amount")
+        use_your_super_payoff = st.checkbox("Use Your Super Access Amount to Pay Off Mortgage?", value=True, key="use_your_super_payoff")
     else:
         # Set defaults if checkbox is off to avoid errors later
         user_retire_year = proj_years_default + 1 # Effectively disable
         user_super_amount = 0
         wife_retire_year = proj_years_default + 1 # Effectively disable
         wife_super_amount = 0
+        use_your_super_payoff = False # Ensure default is False if parent checkbox is off
 
 # Future Education Costs
 with st.sidebar.expander("Future Education Costs", expanded=False):
@@ -650,7 +652,7 @@ monthly_mortgage_payment = calculate_monthly_mortgage_payment(loan_amount_final,
 loan_balance = calculate_loan_balance_over_time(loan_amount_final, interest_rate, monthly_mortgage_payment, loan_term)
 
 # Calculate annual loan data matching projection years
-loan_data = calculate_annual_totals(loan_balance, monthly_payment, loan_term, projection_years, interest_rate)
+loan_data = calculate_annual_totals(loan_balance, monthly_mortgage_payment, loan_term, projection_years, interest_rate)
 
 # Project income and expenses - includes event logic
 projection_data = project_income_expenses(
@@ -673,8 +675,48 @@ projection_data = project_income_expenses(
 # Merge loan balance into projection data
 merged_data = pd.merge(projection_data, loan_data[['Year', 'Loan_Balance']], on='Year', how='left')
 
+# --- START: Mortgage Payoff Logic ---
+payoff_applied_info = "" # For potential display later
+if include_super_events and use_your_super_payoff:
+    # Check if the retirement year is within the projection period
+    if user_retire_year <= projection_years and not merged_data[merged_data['Year'] == user_retire_year].empty:
+
+        # Get loan balance just BEFORE the super is received (end of previous year or start of current)
+        # Using balance at the end of the specified year seems most intuitive for payoff decision
+        loan_balance_at_payoff_year = merged_data.loc[merged_data['Year'] == user_retire_year, 'Loan_Balance'].iloc[0]
+
+        # Get the super amount for payoff
+        super_lump_sum_for_payoff = user_super_amount # Assuming we use the full specified amount
+
+        # Calculate how much is actually used for payoff
+        amount_paid_off = min(super_lump_sum_for_payoff, loan_balance_at_payoff_year)
+
+        # Calculate the new loan balance after payoff
+        new_loan_balance_after_payoff = max(0, loan_balance_at_payoff_year - amount_paid_off)
+
+        if amount_paid_off > 0:
+            payoff_applied_info = f"Mortgage payoff applied in Year {user_retire_year}. Amount: ${amount_paid_off:,.0f}. New Balance: ${new_loan_balance_after_payoff:,.0f}."
+            st.sidebar.success(payoff_applied_info) # Show message in sidebar
+
+            # Update the DataFrame for the payoff year and all subsequent years
+            payoff_mask = merged_data['Year'] >= user_retire_year
+            merged_data.loc[payoff_mask, 'Loan_Balance'] = new_loan_balance_after_payoff
+            merged_data.loc[payoff_mask, 'Annual_Mortgage_Payment'] = 0 # No more payments after payoff
+
+            # Recalculate cumulative cashflow because expenses changed from payoff year onwards
+            # Recalculate net cashflow first based on zero mortgage payments
+            merged_data.loc[payoff_mask, 'Total_Expenses'] = merged_data['Total_Expenses_Excl_Mortgage'] # Remove mortgage payment
+            merged_data.loc[payoff_mask, 'Net_Cashflow'] = merged_data['Total_Income'] - merged_data['Total_Expenses']
+            # Now recalculate cumulative sum from scratch
+            merged_data['Cumulative_Cashflow'] = merged_data['Net_Cashflow'].cumsum()
+
+
+# --- END: Mortgage Payoff Logic ---
+
 # Calculate property value and LVR over time
 merged_data['Property_Value'] = [property_price * ((1 + property_growth_rate/100) ** year) for year in merged_data['Year']]
+# Recalculate Equity based on potentially adjusted loan balance
+merged_data['Equity'] = merged_data['Property_Value'] - merged_data['Loan_Balance']
 # Avoid division by zero if property value becomes zero or negative (unlikely but safe)
 merged_data['LVR_Percent'] = (merged_data['Loan_Balance'] / merged_data['Property_Value'].replace(0, np.nan)) * 100
 merged_data['LVR_Percent'] = merged_data['LVR_Percent'].fillna(0).clip(lower=0) # Handle NaN and ensure non-negative
@@ -1252,6 +1294,7 @@ def save_config():
         "user_super_amount": user_super_amount,
         "wife_retire_year": wife_retire_year,
         "wife_super_amount": wife_super_amount,
+        "use_your_super_payoff": use_your_super_payoff,
         "include_education_change": include_education_change,
         "years_until_edu_change": years_until_edu_change,
         "new_annual_edu_cost_per_child": new_annual_edu_cost_per_child,
