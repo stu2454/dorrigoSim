@@ -445,10 +445,10 @@ def project_income_expenses(
 
 # --- Sidebar Inputs ---
 try:
-    st.sidebar.image("dorrigo.jpg", caption="Dorrigo, NSW", use_column_width=True)
+    st.sidebar.image("dorrigo.jpg", caption="Dorrigo, NSW", use_container_width=True)
 except FileNotFoundError:
     st.sidebar.warning("dorrigo.jpg not found. Displaying placeholder.")
-    st.sidebar.image("https://via.placeholder.com/300x100?text=Dorrigo+NSW", use_column_width=True)
+    st.sidebar.image("https://via.placeholder.com/300x100?text=Dorrigo+NSW", use_container_width=True)
 st.sidebar.markdown("## Property & Upfront Costs")
 
 # Property Information
